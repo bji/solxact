@@ -502,10 +502,9 @@ fn read_data_values(
 
         if words[0] == "#" {
             // This is a comment, ignore it
-            eprintln!("Found comment");
             words.remove(0);
             // An incomplete comment is ignored
-            eprintln!("{:?}", read_string_value(words));
+            read_string_value(words)?;
             continue;
         }
 
