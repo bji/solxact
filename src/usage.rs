@@ -22,15 +22,15 @@ Some example use cases of solxact:
 
 $ solxact encode encoding rust_bincode_fixedint                          \\
                  fee_payer ./my_key.json                                 \\
-                 # \"Stake program\"                                       \\
+                 // Stake program //                                     \\
                  program Stake11111111111111111111111111111111111111     \\
-                 # \"Stake account to split lamports from (writable)\"     \\
+                 // Stake account to split lamports from (writable) //   \\
                  account ./from_stake_account.json w                     \\
-                 # \"Stake account to split lamports into (writable)\"     \\
+                 // Stake account to split lamports into (writable) //   \\
                  account ./to_stake_account.json w                       \\
-                 # \"Stake withdraw authority (signer)\"                   \\
+                 // Stake withdraw authority (signer) //                 \\
                  account ./my_key.json s                                 \\
-                 # \"Data: 3 = split-stake, and then lamports\"            \\
+                 // Data: 3 = split-stake, and then lamports //          \\
                  enum 3 [ u64 10000000 ]                                 \\
   | solxact hash                                                         \\
   | solxact sign ./my_key.json                                           \\
@@ -42,13 +42,13 @@ $ solxact encode encoding rust_bincode_fixedint                          \\
 
 $ solxact encode encoding rust_bincode_fixedint                          \\
                  fee_payer ./my_key.json                                 \\
-                 # \"System program\"                                      \\
+                 // System program //                                    \\
                  program 11111111111111111111111111111111                \\
-                 # \"Funds source (writable and signer)\"                  \\
+                 // Funds source (writable and signer) //                \\
                  account ./my_key.json ws                                \\
-                 # \"Funds destination (writable)\"                        \\
+                 // Funds destination (writable) //                      \\
                  account AVheJF4ZzCZjfysZP2FHdFERY3r7dh9AdBRRcJRWKARc w  \\
-                 # \"Data: 2 = transfer, and then lamports\"               \\
+                 // Data: 2 = transfer, and then lamports //             \\
                  enum 2 [ u64 12131001000 ]                              \\
   | solxact decode                                                       \\
   | jq .
@@ -73,13 +73,13 @@ $ solxact show-unsigned
   
 $ solxact encode encoding rust_bincode_fixedint                          \\
                  fee_payer ./my_key.json                                 \\
-                 # \"System program\"                                      \\
+                 // System program //                                    \\
                  program 11111111111111111111111111111111                \\
-                 # \"Funds source (writable and signer)\"                  \\
+                 // Funds source (writable and signer) //                \\
                  account ./my_key.json ws                                \\
-                 # \"Funds destination (writable)\"                        \\
+                 // Funds destination (writable) //                      \\
                  account AVheJF4ZzCZjfysZP2FHdFERY3r7dh9AdBRRcJRWKARc w  \\
-                 # \"Data: 2 = transfer, and then lamports\"               \\
+                 // Data: 2 = transfer, and then lamports //             \\
                  enum 2 [ u64 12131001000 ]                              \\
   | solxact hash                                                         \\
   | solxact sign ./my_key.json                                           \\
@@ -253,11 +253,8 @@ The arguments to solxact are drawn from the following set:
 
     Encodes a Rust-style Option value, where the Option is None.
 
-  In addition, comments that begin with a single \"#\" value may be 
-  supplied and will be ignored.  In order to differentiate comments
-  from data values, comments that include whitespace must be encoded
-  as a double-quoted string (with \" escaped as \\\" and \\ escaped
-  as \\\\).
+  In addition, comments that begin with \"//\" and end with \"//\"
+  will be ignored.
 
 ";
 

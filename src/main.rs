@@ -30,8 +30,7 @@
  *        enum index [ list_of_values ]
  *        some value
  *        none
- *        # SINGLE_WORD_STRING -- ignored
- *        # "MULTI_WORD_STRING" -- (with " escaped as \" and \ escaped as \\) ignored
+ *        // COMMENT // -- ignored
  *
  * solxact decode: reads from stdin, decodes, and prints out the decoded tx to stdout
  *
@@ -251,7 +250,7 @@ fn is_data_value_terminator(s : &str) -> bool
 {
     match s {
         "program" | "bool" | "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64" |
-        "string" | "c_string" | "pubkey" | "vector" | "struct" | "enum" | "some" | "none" | "]" | "#" => true,
+        "string" | "c_string" | "pubkey" | "vector" | "struct" | "enum" | "some" | "none" | "]" | "//" => true,
         _ => false
     }
 }
@@ -500,11 +499,20 @@ fn read_data_values(
             break;
         }
 
-        if words[0] == "#" {
+        if words[0] == "//" {
             // This is a comment, ignore it
             words.remove(0);
-            // An incomplete comment is ignored
-            read_string_value(words)?;
+            loop {
+                if words.len() == 0 {
+                    return Err(stre("The final comment is incomplete"));
+                }
+                else {
+                    let word = words.remove(0);
+                    if word == "//" {
+                        break;
+                    }
+                }
+            }
             continue;
         }
 
