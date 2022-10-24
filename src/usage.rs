@@ -293,10 +293,10 @@ $ solxact hash https://api.devnet.solana.com
 The following cluster identifiers may be used to refer to specific
 clusters:
 
-l -- localhost
-d -- devnet
-t -- testnet
-m -- mainnet
+l, localhost -- http://127.0.0.7:8899
+d, devnet -- https://api.devnet.solana.com
+t, testnet -- https://api.testnet.solana.com
+m, mainnet -- https://api.mainnet-beta.solana.com
 
 For example, the following will fetch the most recent blockhash
 from the testnet cluster:
@@ -358,10 +358,10 @@ $ solxact simulate https://api.devnet.solana.com
 The following cluster identifiers may be used to refer to specific
 clusters:
 
-l -- localhost
-d -- devnet
-t -- testnet
-m -- mainnet
+l, localhost -- http://127.0.0.7:8899
+d, devnet -- https://api.devnet.solana.com
+t, testnet -- https://api.testnet.solana.com
+m, mainnet -- https://api.mainnet-beta.solana.com
 
 For example, the following will simulate the transaction on the
 testnet cluster:
@@ -393,15 +393,15 @@ $ solxact submit https://api.devnet.solana.com
 The following cluster identifiers may be used to refer to specific
 clusters:
 
-l -- localhost
-d -- devnet
-t -- testnet
-m -- mainnet
+l, localhost -- http://127.0.0.7:8899
+d, devnet -- https://api.devnet.solana.com
+t, testnet -- https://api.testnet.solana.com
+m, mainnet -- https://api.mainnet-beta.solana.com
 
 For example, the following will submit the transaction to the
 testnet cluster:
 
-$ solxact submit t
+$ solxact submit testnet
 
 Note that transactions that are submitted must have a valid
 recent blockhash supplied (e.g. via solxact hash) and be signed

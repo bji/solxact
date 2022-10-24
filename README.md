@@ -1,6 +1,4 @@
 ```
-$ solxact help
-
 solxact is a utility program that can perform many useful actions on
 solana transactions.
 
