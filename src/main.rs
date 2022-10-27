@@ -199,12 +199,35 @@ fn make_pubkey(s : &str) -> Result<Pubkey, Error>
     Ok(make_keypair(s).map(|kp| Pubkey(kp.public.to_bytes())).or_else(|_| Pubkey::from_str(s))?)
 }
 
+fn skip_comments(words : &mut Vec<String>) -> Result<(), Error>
+{
+    while (words.len() > 0) && (words[0] == "//") {
+        // This is a comment, ignore it
+        words.remove(0);
+        loop {
+            if words.len() == 0 {
+                return Err(stre("The final comment is incomplete"));
+            }
+            else {
+                let word = words.remove(0);
+                if word == "//" {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn read_accounts(
     words : &mut Vec<String>,
     into : &mut Vec<(Address, bool, bool)>
 ) -> Result<(), Error>
 {
     loop {
+        skip_comments(words)?;
+
         if (words.len() == 0) || (words[0] != "account") {
             break;
         }
@@ -495,25 +518,10 @@ fn read_data_values(
 ) -> Result<(), Error>
 {
     loop {
+        skip_comments(words)?;
+
         if words.len() == 0 {
             break;
-        }
-
-        if words[0] == "//" {
-            // This is a comment, ignore it
-            words.remove(0);
-            loop {
-                if words.len() == 0 {
-                    return Err(stre("The final comment is incomplete"));
-                }
-                else {
-                    let word = words.remove(0);
-                    if word == "//" {
-                        break;
-                    }
-                }
-            }
-            continue;
         }
 
         let data_value = read_data_value(words)?;
@@ -1133,6 +1141,8 @@ fn do_encode(args : &mut std::env::Args) -> Result<(), Error>
 
     // Read and add instructions
     loop {
+        skip_comments(&mut words)?;
+
         if words.len() == 0 {
             break;
         }
