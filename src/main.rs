@@ -1153,7 +1153,7 @@ fn do_encode(args : &mut std::env::Args) -> Result<(), Error>
 
         let program_id = make_pubkey(&read_single_value(&mut words)?)?;
 
-        let mut accounts : Vec<(Address, bool, bool)> = vec![(program_id.clone().into(), false, false)];
+        let mut accounts : Vec<(Address, bool, bool)> = vec![];
 
         read_accounts(&mut words, &mut accounts)?;
 
