@@ -24,6 +24,7 @@
  *        c_string MAX_LEN SINGLE_WORD_STRING (string bytes, then zero pads to MAX_LEN)
  *        c_string MAX_LEN "MULTI_WORD_STRING" (with " escaped as \" and \ escaped as \\)
  *        pubkey BASE58
+ *        sha256 SHA256_HEX
  *        vector [ list_of_values ]
  *        struct [ list of values ]
  *        enum index
@@ -113,6 +114,8 @@ enum DataValue
 
     Pubkey(Pubkey),
 
+    Sha256([u8; 32]),
+
     Vector(Vec<Box<DataValue>>),
 
     Struct(Vec<Box<DataValue>>),
@@ -199,6 +202,18 @@ fn make_pubkey(s : &str) -> Result<Pubkey, Error>
     Ok(make_keypair(s).map(|kp| Pubkey(kp.public.to_bytes())).or_else(|_| Pubkey::from_str(s))?)
 }
 
+fn make_sha256(s : &str) -> Result<[u8; 32], Error>
+{
+    let v = hex::decode(s)?;
+
+    if v.len() == 32 {
+        Ok(v.try_into().unwrap())
+    }
+    else {
+        Err(stre(&format!("Invalid sha256: {}", s)))
+    }
+}
+
 fn skip_comments(words : &mut Vec<String>) -> Result<(), Error>
 {
     while (words.len() > 0) && (words[0] == "//") {
@@ -273,7 +288,9 @@ fn is_data_value_terminator(s : &str) -> bool
 {
     match s {
         "program" | "bool" | "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64" |
-        "string" | "c_string" | "pubkey" | "vector" | "struct" | "enum" | "some" | "none" | "]" | "//" => true,
+        "string" | "c_string" | "pubkey" | "sha256" | "vector" | "struct" | "enum" | "some" | "none" | "]" | "//" => {
+            true
+        },
         _ => false
     }
 }
@@ -379,6 +396,8 @@ fn read_vector(
     let mut v = vec![];
 
     loop {
+        skip_comments(words)?;
+
         if words.len() == 0 {
             return Err(stre(&format!("The final {} parameter is incomplete", prefix)));
         }
@@ -466,6 +485,7 @@ fn read_data_value(words : &mut Vec<String>) -> Result<Option<DataValue>, Error>
             Ok(Some(DataValue::CString { max_length, string : read_string_value(words)? }))
         },
         "pubkey" => Ok(Some(DataValue::Pubkey(make_pubkey(&read_single_value(words)?)?))),
+        "sha256" => Ok(Some(DataValue::Sha256(make_sha256(&read_single_value(words)?)?))),
         "vector" => {
             words.remove(0); // vector
             if words.len() == 0 {
@@ -673,6 +693,13 @@ fn write_rust_bincode_value(
 
         DataValue::Pubkey(p) => bincode_encode(p.0, varint, into),
 
+        DataValue::Sha256(a) => {
+            for u in a {
+                bincode_encode(u, varint, into)?;
+            }
+            Ok(())
+        },
+
         DataValue::Vector(v) => {
             let v = vector_normalize(&v);
             bincode_encode(v.len(), varint, into)?;
@@ -820,6 +847,13 @@ fn write_rust_borsh_value(
 
         DataValue::Pubkey(p) => borsh_encode(p.0, into),
 
+        DataValue::Sha256(a) => {
+            for u in a {
+                borsh_encode(u, into)?;
+            }
+            Ok(())
+        },
+
         DataValue::Vector(v) => {
             let v = vector_normalize(&v);
             if v.len() > (u32::MAX as usize) {
@@ -893,6 +927,7 @@ fn c_alignment(dv : &DataValue) -> usize
         DataValue::String(_) => 1,
         DataValue::CString { max_length: _, string: _ } => 1,
         DataValue::Pubkey(_) => 1,
+        DataValue::Sha256(_) => 1,
         DataValue::Vector(_) => 1,
         DataValue::Struct(v) => c_max_alignment(v),
         DataValue::Enum { index: _, params } => {
@@ -992,7 +1027,9 @@ fn write_c_value(
             }
         },
 
-        DataValue::Pubkey(p) => write_c_value(DataValue::U8List(p.0.to_vec()), into)?,
+        DataValue::Pubkey(p) => write_c_value(DataValue::U8List(p.0.into()), into)?,
+
+        DataValue::Sha256(p) => write_c_value(DataValue::U8List(p.into()), into)?,
 
         DataValue::Vector(_) => return Err(stre("vector value cannot be used with c encoding")),
 
