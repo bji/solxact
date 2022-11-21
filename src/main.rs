@@ -1,47 +1,19 @@
 /**
- * Decode/encode transactions, apply recent blockhash, and submit.
+ * solxact is a utility program that can perform many useful actions on
+ * solana transactions.
  *
- * solxact encode: reads from stdin or command line, encodes tx, and writes it to stdout
- *   - solxact encode with no arguments: read from stdin
- *   - solxact encode with arguments: processes arguments
- *        encoding rust_bincode_varint/rust_bincode_fixedint/rust_borsh/c (default rust_bincode_varint)
- *        fee_payer PUBKEY
- *        program PUBKEY
- *        account PUBKEY [w, s, ws, or sw]
- *        bool whitespace_separated_bools (NOTE that this is NOT a Rust slice; it's just an exact sequence of bools)
- *        u8 whitespace_separated_u8s (NOTE that this is NOT a Rust slice; it's just an exact sequence of u8s)
- *        u16 whitespace_separated_u16s (NOTE that this is NOT a Rust slice; it's just an exact sequence of u16s)
- *        u32 whitespace_separated_u32s (NOTE that this is NOT a Rust slice; it's just an exact sequence of u32s)
- *        u64 whitespace_separated_u64s (NOTE that this is NOT a Rust slice; it's just an exact sequence of u64s)
- *        s8 whitespace_separated_u8s (NOTE that this is NOT a Rust slice; it's just an exact sequence of u8s)
- *        i16 whitespace_separated_u16s (NOTE that this is NOT a Rust slice; it's just an exact sequence of u16s)
- *        i32 whitespace_separated_u32s (NOTE that this is NOT a Rust slice; it's just an exact sequence of u32s)
- *        i64 whitespace_separated_u64s (NOTE that this is NOT a Rust slice; it's just an exact sequence of u64s)
- *        f32 whitespace_separated_f32s (NOTE that this is NOT a Rust slice; it's just an exact sequence of f32s)
- *        f64 whitespace_separated_f64s (NOTE that this is NOT a Rust slice; it's just an exact sequence of f64s)
- *        string SINGLE_WORD_STRING
- *        string "MULTI_WORD_STRING" (with " escaped as \" and \ escaped as \\)
- *        c_string MAX_LEN SINGLE_WORD_STRING (string bytes, then zero pads to MAX_LEN)
- *        c_string MAX_LEN "MULTI_WORD_STRING" (with " escaped as \" and \ escaped as \\)
- *        pubkey BASE58
- *        sha256 SHA256_HEX
- *        vector [ list_of_values ]
- *        struct [ list of values ]
- *        enum index
- *        enum index [ list_of_values ]
- *        some value
- *        none
- *        // COMMENT // -- ignored
+ * For help on subcommands:
  *
- * solxact decode: reads from stdin, decodes, and prints out the decoded tx to stdout
- *
- * solxact hash [-u RPC_ENDPOINT]: reads tx from stdin, fetches recent blockhash from RPC_ENDPOINT, applies hash to tx,
- *                               writes encoded tx to stdout
- *
- * solxact sign --interactive/-i: this is solsign
- * solxact sign: this is solsign --no-prompt
- *
- * solxact submit [RPC_ENDPOINT]: reads tx from stdin, submits tx for execution to RPC_ENDPOINT (defaults to mainnet-beta)
+ * solxact help encode        -- for encoding a transaction
+ * solxact help decode        -- for decoding a transaction
+ * solxact help hash          -- for setting the recent blockhash of a transaction
+ * solxact help sign          -- for signing a transaction
+ * solxact help show-unsigned -- for showing which signatures are still required
+ * solxact help signature     -- for showing a transaction's signature
+ * solxact help simulate      -- for simulating a transaction
+ * solxact help submit        -- for submitting a transaction
+ * solxact help pda           -- for computing program derived addresses
+ * solxact help pubkey        -- for displaying pubkeys
  **/
 mod transaction;
 mod usage;
@@ -202,11 +174,45 @@ fn make_keypair(s : &str) -> Result<ed25519_dalek::Keypair, Error>
     })
 }
 
+fn private_key_bytes_array_to_pubkey(bytes : &str) -> Result<Pubkey, Error>
+{
+    if bytes.starts_with("[") && bytes.ends_with("]") {
+        let bytes = &bytes[1..(bytes.len() - 1)];
+        Ok(Pubkey(
+            ed25519_dalek::Keypair::from_bytes(u8_list_to_vec(&bytes)?.as_slice())
+                .map_err(|e| e.to_string())?
+                .public
+                .to_bytes()
+        ))
+    }
+    else {
+        Err(stre(&format!("Invalid private key byte array: {}", bytes)))
+    }
+}
+
+fn public_key_bytes_array_to_pubkey(bytes : &str) -> Result<Pubkey, Error>
+{
+    if bytes.starts_with("[") && bytes.ends_with("]") {
+        let bytes = &bytes[1..(bytes.len() - 1)];
+        Ok(Pubkey(
+            u8_list_to_vec(&bytes)?.try_into().map_err(|_| "Incorrect number of bytes in public key".to_string())?
+        ))
+    }
+    else {
+        Err(stre(&format!("Invalid public key byte array: {}", bytes)))
+    }
+}
+
 // Create a pubkey from a string which might represent an actual pubkey in base-58 encoded format, or a filename
-// containing an ed25519 keypair
+// containing an ed25519 keypair, or a JSON byte array of a keypair or pubkey
 fn make_pubkey(s : &str) -> Result<Pubkey, Error>
 {
-    Ok(make_keypair(s).map(|kp| Pubkey(kp.public.to_bytes())).or_else(|_| Pubkey::from_str(s))?)
+    std::fs::read_to_string(&s)
+        .map_err(|e| stre(e.to_string().as_str()))
+        .and_then(|pk_bytes| private_key_bytes_array_to_pubkey(&pk_bytes))
+        .or_else(|_| Pubkey::from_str(&s).map_err(|e| stre(&e)))
+        .or_else(|_| private_key_bytes_array_to_pubkey(&s))
+        .or_else(|_| public_key_bytes_array_to_pubkey(&s))
 }
 
 fn make_sha256(s : &str) -> Result<[u8; 32], Error>
@@ -290,6 +296,34 @@ fn skip_comments(words : &mut Vec<String>) -> Result<(), Error>
     Ok(())
 }
 
+// Turn words into a pubkey identifier, which is either a single String (being a path, or a Base58-encoded pubkey),
+// or is an JSON array (which is turned back into a string)
+fn pubkey_from_words(words : &mut Vec<String>) -> Result<String, Error>
+{
+    if words.len() == 0 {
+        Err(stre("Missing pubkey value"))
+    }
+    else {
+        if words[0] == "[" {
+            let mut array = "[".to_string();
+            words.remove(0);
+            loop {
+                if words.len() == 0 {
+                    return Err(stre("The final pubkey value array is incomplete"));
+                }
+                let word = words.remove(0);
+                array = format!("{}{}", array, word);
+                if word == "]" {
+                    return Ok(array);
+                }
+            }
+        }
+        else {
+            Ok(words.remove(0))
+        }
+    }
+}
+
 // encoding is used for pda and pda_nobump accounts
 fn read_accounts(
     words : &mut Vec<String>,
@@ -318,7 +352,7 @@ fn read_accounts(
                 write_data_value(dv, encoding, &mut bytes)?;
                 Pubkey(bytes.as_slice().try_into()?)
             },
-            _ => make_pubkey(&words.remove(0))?
+            _ => make_pubkey(&pubkey_from_words(words)?)?
         };
 
         let mut is_signed = false;
@@ -549,12 +583,22 @@ fn read_data_value(words : &mut Vec<String>) -> Result<Option<DataValue>, Error>
                 u16::from_str(&word).map_err(|_| stre(&format!("Invalid max_length in c_string value: {}", word)))?;
             Ok(Some(DataValue::CString { max_length, string : read_string_value(words)? }))
         },
-        "pubkey" => Ok(Some(DataValue::Pubkey(make_pubkey(&read_single_value(words)?)?))),
+        "pubkey" => {
+            words.remove(0);
+            Ok(Some(DataValue::Pubkey(make_pubkey(&pubkey_from_words(words)?)?)))
+        },
         "sha256" => Ok(Some(DataValue::Sha256(make_sha256(&read_single_value(words)?)?))),
-        "pda" => Ok(Some(DataValue::Pda(make_pubkey(&read_single_value(words)?)?, read_vector("pda", words)?))),
-        "bump" => Ok(Some(DataValue::Bump(make_pubkey(&read_single_value(words)?)?, read_vector("bump", words)?))),
+        "pda" => {
+            words.remove(0);
+            Ok(Some(DataValue::Pda(make_pubkey(&pubkey_from_words(words)?)?, read_vector("pda", words)?)))
+        },
+        "bump" => {
+            words.remove(0);
+            Ok(Some(DataValue::Bump(make_pubkey(&pubkey_from_words(words)?)?, read_vector("bump", words)?)))
+        },
         "pda_nobump" => {
-            Ok(Some(DataValue::PdaNoBump(make_pubkey(&read_single_value(words)?)?, read_vector("pda_nobump", words)?)))
+            words.remove(0);
+            Ok(Some(DataValue::PdaNoBump(make_pubkey(&pubkey_from_words(words)?)?, read_vector("pda_nobump", words)?)))
         },
         "vector" => {
             words.remove(0); // vector
@@ -1167,7 +1211,7 @@ fn write_c_value(
             into.extend(f.to_le_bytes());
         }),
 
-        DataValue::String(_) => return Err(stre("string value cannot be used with c encoding")),
+        DataValue::String(s) => into.extend(s.as_bytes()),
 
         DataValue::CString { max_length, string } => {
             let zeroes = (max_length as usize).checked_sub(string.len()).ok_or_else(|| {
@@ -1201,7 +1245,9 @@ fn write_c_value(
             // Encode v into a vector of data values.  No alignment is used since seeds should be directly
             // concatenated.
             let mut seed = vec![];
-            write_c_value(DataValue::Vector(v), false, &mut seed)?;
+            for dv in v.into_iter() {
+                write_c_value(*dv, false, &mut seed)?;
+            }
             // Compute the address and bump seed, which must succeed since a
             // bump seed is being used
             let (_, bump_seed) = find_pda(&program_id, &seed).unwrap();
@@ -1213,7 +1259,9 @@ fn write_c_value(
             // Encode v into a vector of data values.  No alignment is used since seeds should be directly
             // concatenated.
             let mut seed = vec![];
-            write_c_value(DataValue::Vector(v), false, &mut seed)?;
+            for dv in v.into_iter() {
+                write_c_value(*dv, false, &mut seed)?;
+            }
             // Compute the address and bump seed, which may fail since a bump seed is not being used
             match try_find_pda(&program_id, &seed, None) {
                 Some(pubkey) => {
@@ -1364,7 +1412,9 @@ fn do_encode(args : &mut std::env::Args) -> Result<(), Error>
             return Err(stre("Expected fee_payer before instructions"));
         }
 
-        make_pubkey(&read_single_value(&mut words)?)?
+        words.remove(0);
+
+        make_pubkey(&pubkey_from_words(&mut words)?)?
     };
 
     let mut transaction = Transaction::new(fee_payer);
@@ -1381,7 +1431,9 @@ fn do_encode(args : &mut std::env::Args) -> Result<(), Error>
             return Err(stre("First line of instruction is expected to be program"));
         }
 
-        let program_id = make_pubkey(&read_single_value(&mut words)?)?;
+        words.remove(0);
+
+        let program_id = make_pubkey(&pubkey_from_words(&mut words)?)?;
 
         let mut accounts : Vec<(Address, bool, bool)> = vec![];
 
@@ -1656,6 +1708,100 @@ fn do_submit(args : &mut std::env::Args) -> Result<(), Error>
     }
 }
 
+fn print_pubkey_bytes(b : &[u8; 32])
+{
+    print!("[");
+    let mut need_comma = false;
+    b.iter().for_each(|b| {
+        if need_comma {
+            print!(",{}", b);
+        }
+        else {
+            print!("{}", b);
+            need_comma = true;
+        }
+    });
+    print!("]");
+}
+
+fn do_pda(args : &mut std::env::Args) -> Result<(), Error>
+{
+    let mut args = args.peekable();
+
+    // First argument may be "no-bump-seed"
+    let no_bump_seed = args.next_if_eq("no-bump-seed").is_some();
+
+    let bytes = args.next_if_eq("bytes").is_some();
+
+    let mut words = Vec::<String>::new();
+
+    args.for_each(|a| words.extend(make_words(&a)));
+
+    let program_id = make_pubkey(&pubkey_from_words(&mut words)?)?;
+
+    // Treat the remaining data values as if they were within a Vector, so that they are turned into a vector of Data
+    // Values
+    words.insert(0, "vector".to_string());
+
+    let v = match read_data_value(&mut words)?.unwrap() {
+        DataValue::Vector(v) => v,
+        _ => panic!("Internal error - vector didn't parse")
+    };
+
+    let mut seed = vec![];
+    for dv in v.into_iter() {
+        write_c_value(*dv, false, &mut seed)?;
+    }
+
+    // Compute the address and bump seed, which may fail since a bump seed is not being used
+    let (pda, bump_seed) = if no_bump_seed {
+        try_find_pda(&program_id, &seed, None)
+            .and_then(|pda| Some((pda, None)))
+            .ok_or(stre("Cannot find PDA, consider allowing bump seed"))?
+    }
+    else {
+        find_pda(&program_id, &seed).and_then(|(pda, bump_seed)| Some((pda, Some(bump_seed)))).unwrap()
+    };
+
+    if bytes {
+        print_pubkey_bytes(&pda.0);
+    }
+    else {
+        print!("{}", pda);
+    }
+
+    match bump_seed {
+        Some(bump_seed) => println!(".{}", bump_seed),
+        None => println!("")
+    }
+
+    Ok(())
+}
+
+fn do_pubkey(args : &mut std::env::Args) -> Result<(), Error>
+{
+    let mut args = args.peekable();
+
+    // First argument may be "bytes"
+    let bytes = args.next_if_eq("bytes").is_some();
+
+    let mut words = Vec::<String>::new();
+
+    args.for_each(|a| words.extend(make_words(&a)));
+
+    let program_id = make_pubkey(&pubkey_from_words(&mut words)?)?;
+
+    if bytes {
+        print_pubkey_bytes(&program_id.0);
+        println!("");
+    }
+    else {
+        println!("{}", program_id);
+    }
+
+    Ok(())
+}
+
 fn do_main() -> Result<(), Error>
 {
     let mut args = std::env::args();
@@ -1673,6 +1819,8 @@ fn do_main() -> Result<(), Error>
                         "signature" => &usage::SIGNATURE_USAGE_MESSAGE,
                         "simulate" => &usage::SIMULATE_USAGE_MESSAGE,
                         "submit" => &usage::SUBMIT_USAGE_MESSAGE,
+                        "pda" => &usage::PDA_USAGE_MESSAGE,
+                        "pubkey" => &usage::PUBKEY_USAGE_MESSAGE,
                         _ => &usage::USAGE_MESSAGE
                     },
                     None => &usage::USAGE_MESSAGE
@@ -1687,6 +1835,8 @@ fn do_main() -> Result<(), Error>
             "signature" => do_signature(),
             "simulate" => do_simulate(&mut args),
             "submit" => do_submit(&mut args),
+            "pda" => do_pda(&mut args),
+            "pubkey" => do_pubkey(&mut args),
             _ => Err(stre(&format!("Unknown command: {}", arg)))
         },
         None => usage_exit(usage::USAGE_MESSAGE, None)

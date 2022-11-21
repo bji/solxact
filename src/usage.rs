@@ -13,6 +13,8 @@ solxact help show-unsigned -- for showing which signatures are still required
 solxact help signature     -- for showing a transaction's signature
 solxact help simulate      -- for simulating a transaction
 solxact help submit        -- for submitting a transaction
+solxact help pda           -- for computing program derived addresses
+solxact help pubkey        -- for displaying pubkeys
 
 
 Some example use cases of solxact:
@@ -85,6 +87,24 @@ $ solxact encode encoding rust_bincode_fixedint                          \\
   | solxact hash                                                         \\
   | solxact sign ./my_key.json                                           \\
   | solxact signature
+
+
+# The following will compute the Program Derived Address for a metaplex
+# metadata account associated with a token mint, and will print out
+# the address followed by a dot followed by the bump seed.  The token mint
+# in this example is is EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v.
+
+$ solxact pda metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s                \\
+              [ string metadata                                          \\
+                pubkey metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s       \\
+                pubkey EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v ]
+
+
+# The following will print out the pubkey for the keypair stored in the
+# file key.json
+
+$ solxact pubkey key.json
+
 
 ";
 
@@ -418,5 +438,103 @@ $ solxact submit testnet
 
 Note that transactions that are submitted must have a valid recent blockhash
 supplied (e.g. via solxact hash) and be signed (e.g. via solxact sign).
+
+";
+
+#[rustfmt::skip]
+pub const PDA_USAGE_MESSAGE : &str = "
+
+solxact pda will compute the Program Derived Address and optionallly, a bump
+seed, given a program id and a set of seeds from which to derive the Program
+Derived Address.  Unless no bump seed has been specified, the output will
+be:
+
+PUBKEY.BUMP_SEED
+
+i.e., the derived pubkey, followed by a dot, followed by the bump seed.
+
+The seeds are specified using the same data value format as used by the encode
+command.
+
+If the first argument is \"no-bump-seed\" then no bump seed will be used to
+find a valid Program Derived Address.  In this case, the solxact pda command
+may fail because the specified program id and set of seeds may not produce a
+valid Program Derived Address.  On success, only the pubkey is printed out,
+without the '.bump_seed' prefix that is normally printed out.
+
+If the first argument, or second argument if \"no-bump-seed\" was the first
+argument, is \"bytes\", then the pubkey format as printed will be a JSON byte
+array of the pubkey value.  Otherwise, the pubkey will be printed as a
+Base58-encoded string.
+
+For example, the following computes the Program Derived Address of the USDC
+token mint, and prints it out
+
+$ solxact pda metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s                \\
+              [ string metadata                                          \\
+                pubkey metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s       \\
+                pubkey EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v ]
+
+The output of this command is:
+
+5x38Kp4hvdomTCnCrAny4UtMUt5rQBdB6px2K1Ui45Wq.255
+
+
+The following example computes the same pubkey as the previous example, but
+prints out the pubkey as an array of JSON bytes:
+
+$ solxact pda bytes metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s          \\
+                    [ string metadata                                    \\
+                      pubkey metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s \\
+                      pubkey EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v ]
+
+The output of this command is:
+
+[73,136,24,173,152,105,114,247,124,17,186,135,135,129,147,103,214,46,137,\\
+36,246,219,107,107,211,125,199,76,47,217,97,58].255
+
+
+The following will derive a Program Derived Address without using a bump seed,
+which means that only exactly the seeds provided will be used.  In this case,
+there is no Program Derived Address for this program id and seeds, so an error
+is reported:
+
+$ solxact pda no-bump-seed TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA   \\
+                           [ u8 3 6 
+                             string '\"Hello, world!\"' ]
+
+The output of this command is:
+
+ERROR: Cannot find PDA, consider allowing bump seed
+
+";
+
+#[rustfmt::skip]
+pub const PUBKEY_USAGE_MESSAGE : &str = "
+
+solxact pubkey will read a pubkey in from several possible sources, and then
+print out the pubkey in one of two possible formats.
+
+If \"bytes\" is the first argument, then the pubkey will be printed out as a
+JSON array of bytes, otherwise, the pubkey will be printed out as a
+Base58-encoded string.
+
+The argument specifying input pubkey is the last argument to the program.  It
+is one of:
+
+- A JSON encoded array of bytes which is the pubkey
+- The path to a file containing a JSON formatted array whose contents is a
+  keypair from which the pubkey will be extracted
+- A Base58-encoded pubkey
+
+
+For example, to print out the Base58-encoded pubkey for a keypair file:
+
+$ solxact pubkey key.json
+
+
+To convert a pubkey from Base58 to a JSON array of bytes:
+
+$ solxact pubkey bytes metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s
 
 ";
