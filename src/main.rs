@@ -48,6 +48,7 @@ mod usage;
 
 use bincode::Options;
 use ed25519_dalek::Signer;
+use sha2::{Digest, Sha256};
 use std::fmt::Write;
 use std::io::BufRead;
 use std::io::Write as IoWrite;
@@ -115,6 +116,12 @@ enum DataValue
     Pubkey(Pubkey),
 
     Sha256([u8; 32]),
+
+    Pda(Pubkey, Vec<Box<DataValue>>),
+
+    Bump(Pubkey, Vec<Box<DataValue>>),
+
+    PdaNoBump(Pubkey, Vec<Box<DataValue>>),
 
     Vector(Vec<Box<DataValue>>),
 
@@ -214,6 +221,54 @@ fn make_sha256(s : &str) -> Result<[u8; 32], Error>
     }
 }
 
+fn bytes_are_curve_point(bytes : &[u8; 32]) -> bool
+{
+    curve25519_dalek::edwards::CompressedEdwardsY::from_slice(bytes.as_ref()).decompress().is_some()
+}
+
+fn try_find_pda(
+    pubkey : &Pubkey,
+    seed : &[u8],
+    bump_seed : Option<u8>
+) -> Option<Pubkey>
+{
+    let mut hasher = Sha256::new();
+
+    hasher.update(&seed);
+    if let Some(bump_seed) = bump_seed {
+        hasher.update(&[bump_seed]);
+    }
+    hasher.update(&pubkey.0);
+    hasher.update(b"ProgramDerivedAddress");
+
+    let hash = <[u8; 32]>::try_from(hasher.finalize().as_slice()).unwrap();
+
+    if bytes_are_curve_point(&hash) {
+        None
+    }
+    else {
+        Some(Pubkey(hash))
+    }
+}
+
+fn find_pda(
+    program_id : &Pubkey,
+    seed : &[u8]
+) -> Option<(Pubkey, u8)>
+{
+    // Use the same algorithm as Solana's seed finding algorithm: start the bump seed at 255 and work backwards
+    let mut bump_seed = (std::u8::MAX) as i16;
+
+    while bump_seed >= 0 {
+        if let Some(pubkey) = try_find_pda(&program_id, seed, Some(bump_seed as u8)) {
+            return Some((pubkey, bump_seed as u8));
+        }
+        bump_seed -= 1;
+    }
+
+    None
+}
+
 fn skip_comments(words : &mut Vec<String>) -> Result<(), Error>
 {
     while (words.len() > 0) && (words[0] == "//") {
@@ -235,8 +290,10 @@ fn skip_comments(words : &mut Vec<String>) -> Result<(), Error>
     Ok(())
 }
 
+// encoding is used for pda and pda_nobump accounts
 fn read_accounts(
     words : &mut Vec<String>,
+    encoding : &Encoding,
     into : &mut Vec<(Address, bool, bool)>
 ) -> Result<(), Error>
 {
@@ -253,7 +310,16 @@ fn read_accounts(
             return Err(stre("Missing account pubkey"));
         }
 
-        let pubkey = make_pubkey(&words.remove(0))?;
+        // Account may come from a pda or pda_nobump value
+        let pubkey = match words[0].as_str() {
+            "pda" | "pda_nobump" => {
+                let dv = read_data_value(words)?.unwrap();
+                let mut bytes = vec![];
+                write_data_value(dv, encoding, &mut bytes)?;
+                Pubkey(bytes.as_slice().try_into()?)
+            },
+            _ => make_pubkey(&words.remove(0))?
+        };
 
         let mut is_signed = false;
 
@@ -288,9 +354,8 @@ fn is_data_value_terminator(s : &str) -> bool
 {
     match s {
         "program" | "bool" | "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64" |
-        "string" | "c_string" | "pubkey" | "sha256" | "vector" | "struct" | "enum" | "some" | "none" | "]" | "//" => {
-            true
-        },
+        "string" | "c_string" | "pubkey" | "sha256" | "pda" | "bump" | "pda_nobump" | "vector" | "struct" |
+        "enum" | "some" | "none" | "]" | "//" => true,
         _ => false
     }
 }
@@ -486,6 +551,11 @@ fn read_data_value(words : &mut Vec<String>) -> Result<Option<DataValue>, Error>
         },
         "pubkey" => Ok(Some(DataValue::Pubkey(make_pubkey(&read_single_value(words)?)?))),
         "sha256" => Ok(Some(DataValue::Sha256(make_sha256(&read_single_value(words)?)?))),
+        "pda" => Ok(Some(DataValue::Pda(make_pubkey(&read_single_value(words)?)?, read_vector("pda", words)?))),
+        "bump" => Ok(Some(DataValue::Bump(make_pubkey(&read_single_value(words)?)?, read_vector("bump", words)?))),
+        "pda_nobump" => {
+            Ok(Some(DataValue::PdaNoBump(make_pubkey(&read_single_value(words)?)?, read_vector("pda_nobump", words)?)))
+        },
         "vector" => {
             words.remove(0); // vector
             if words.len() == 0 {
@@ -700,6 +770,45 @@ fn write_rust_bincode_value(
             Ok(())
         },
 
+        DataValue::Pda(program_id, v) => {
+            // Encode v into a vector of bytes, which is the base seed.  Fixed int is used as varint doesn't
+            // make sense for seed values.
+            let mut seed = vec![];
+            write_rust_bincode_value(DataValue::Vector(v), false, &mut seed)?;
+            // Compute the address and bump seed, which must succeed since a
+            // bump seed is being used
+            let (pubkey, _) = find_pda(&program_id, &seed).unwrap();
+            // Encode the pubkey
+            bincode_encode(pubkey.0, false, into)
+        },
+
+        DataValue::Bump(program_id, v) => {
+            // Encode v into a vector of bytes, which is the base seed.  Fixed int is used as varint doesn't
+            // make sense for seed values.
+            let mut seed = vec![];
+            write_rust_bincode_value(DataValue::Vector(v), false, &mut seed)?;
+            // Compute the address and bump seed, which must succeed since a
+            // bump seed is being used
+            let (_, bump_seed) = find_pda(&program_id, &seed).unwrap();
+            // Encode the pubkey.
+            bincode_encode(bump_seed, varint, into)
+        },
+
+        DataValue::PdaNoBump(program_id, v) => {
+            // Encode v into a vector of bytes, which is the base seed.  Fixed int is used as varint doesn't
+            // make sense for seed values.
+            let mut seed = vec![];
+            write_rust_bincode_value(DataValue::Vector(v), false, &mut seed)?;
+            // Compute the address and bump seed, which may fail since a bump seed is not being used
+            match try_find_pda(&program_id, &seed, None) {
+                Some(pubkey) => {
+                    // Encode the pubkey
+                    bincode_encode(pubkey.0, false, into)
+                },
+                None => Err(stre("PDA could not be derived"))
+            }
+        },
+
         DataValue::Vector(v) => {
             let v = vector_normalize(&v);
             bincode_encode(v.len(), varint, into)?;
@@ -854,6 +963,42 @@ fn write_rust_borsh_value(
             Ok(())
         },
 
+        DataValue::Pda(program_id, v) => {
+            // Encode v into a vector of bytes, which is the base seed
+            let mut seed = vec![];
+            write_rust_borsh_value(DataValue::Vector(v), &mut seed)?;
+            // Compute the address and bump seed, which must succeed since a
+            // bump seed is being used
+            let (pubkey, _) = find_pda(&program_id, &seed).unwrap();
+            // Encode the pubkey
+            borsh_encode(pubkey.0, into)
+        },
+
+        DataValue::Bump(program_id, v) => {
+            // Encode v into a vector of bytes, which is the base seed
+            let mut seed = vec![];
+            write_rust_borsh_value(DataValue::Vector(v), &mut seed)?;
+            // Compute the address and bump seed, which must succeed since a
+            // bump seed is being used
+            let (_, bump_seed) = find_pda(&program_id, &seed).unwrap();
+            // Encode the pubkey
+            borsh_encode(bump_seed, into)
+        },
+
+        DataValue::PdaNoBump(program_id, v) => {
+            // Encode v into a vector of bytes, which is the base seed
+            let mut seed = vec![];
+            write_rust_borsh_value(DataValue::Vector(v), &mut seed)?;
+            // Compute the address and bump seed, which may fail since a bump seed is not being used
+            match try_find_pda(&program_id, &seed, None) {
+                Some(pubkey) => {
+                    // Encode the pubkey
+                    borsh_encode(pubkey.0, into)
+                },
+                None => Err(stre("PDA could not be derived"))
+            }
+        },
+
         DataValue::Vector(v) => {
             let v = vector_normalize(&v);
             if v.len() > (u32::MAX as usize) {
@@ -902,11 +1047,14 @@ fn write_rust_borsh_value(
 
 fn c_align(
     alignment : usize,
+    should_align : bool,
     into : &mut Vec<u8>
 )
 {
-    while (into.len() % alignment) != 0 {
-        into.push(0);
+    if should_align {
+        while (into.len() % alignment) != 0 {
+            into.push(0);
+        }
     }
 }
 
@@ -928,6 +1076,9 @@ fn c_alignment(dv : &DataValue) -> usize
         DataValue::CString { max_length: _, string: _ } => 1,
         DataValue::Pubkey(_) => 1,
         DataValue::Sha256(_) => 1,
+        DataValue::Pda(_, _) => 1,
+        DataValue::Bump(_, _) => 1,
+        DataValue::PdaNoBump(_, _) => 1,
         DataValue::Vector(_) => 1,
         DataValue::Struct(v) => c_max_alignment(v),
         DataValue::Enum { index: _, params } => {
@@ -959,6 +1110,7 @@ fn c_max_alignment(v : &Vec<Box<DataValue>>) -> usize
 
 fn write_c_value(
     data_value : DataValue,
+    align : bool,
     into : &mut Vec<u8>
 ) -> Result<(), Error>
 {
@@ -972,17 +1124,17 @@ fn write_c_value(
         },
 
         DataValue::U16List(v) => v.into_iter().for_each(|u| {
-            c_align(2, into);
+            c_align(2, align, into);
             into.extend(u.to_le_bytes());
         }),
 
         DataValue::U32List(v) => v.into_iter().for_each(|u| {
-            c_align(4, into);
+            c_align(4, align, into);
             into.extend(u.to_le_bytes());
         }),
 
         DataValue::U64List(v) => v.into_iter().for_each(|u| {
-            c_align(8, into);
+            c_align(8, align, into);
             into.extend(u.to_le_bytes());
         }),
 
@@ -991,27 +1143,27 @@ fn write_c_value(
         }),
 
         DataValue::I16List(v) => v.into_iter().for_each(|i| {
-            c_align(2, into);
+            c_align(2, align, into);
             into.extend(i.to_le_bytes());
         }),
 
         DataValue::I32List(v) => v.into_iter().for_each(|i| {
-            c_align(4, into);
+            c_align(4, align, into);
             into.extend(i.to_le_bytes());
         }),
 
         DataValue::I64List(v) => v.into_iter().for_each(|i| {
-            c_align(8, into);
+            c_align(8, align, into);
             into.extend(i.to_le_bytes());
         }),
 
         DataValue::F32List(v) => v.into_iter().for_each(|f| {
-            c_align(4, into);
+            c_align(4, align, into);
             into.extend(f.to_le_bytes());
         }),
 
         DataValue::F64List(v) => v.into_iter().for_each(|f| {
-            c_align(8, into);
+            c_align(8, align, into);
             into.extend(f.to_le_bytes());
         }),
 
@@ -1027,19 +1179,60 @@ fn write_c_value(
             }
         },
 
-        DataValue::Pubkey(p) => write_c_value(DataValue::U8List(p.0.into()), into)?,
+        DataValue::Pubkey(p) => write_c_value(DataValue::U8List(p.0.into()), align, into)?,
 
-        DataValue::Sha256(p) => write_c_value(DataValue::U8List(p.into()), into)?,
+        DataValue::Sha256(p) => write_c_value(DataValue::U8List(p.into()), align, into)?,
+
+        DataValue::Pda(program_id, v) => {
+            // Encode v into a vector of data values.  No alignment is used since seeds should be directly
+            // concatenated.
+            let mut seed = vec![];
+            for dv in v.into_iter() {
+                write_c_value(*dv, false, &mut seed)?;
+            }
+            // Compute the address and bump seed, which must succeed since a
+            // bump seed is being used
+            let (pubkey, _) = find_pda(&program_id, &seed).unwrap();
+            // Encode the pubkey
+            write_c_value(DataValue::Pubkey(pubkey), false, into)?
+        },
+
+        DataValue::Bump(program_id, v) => {
+            // Encode v into a vector of data values.  No alignment is used since seeds should be directly
+            // concatenated.
+            let mut seed = vec![];
+            write_c_value(DataValue::Vector(v), false, &mut seed)?;
+            // Compute the address and bump seed, which must succeed since a
+            // bump seed is being used
+            let (_, bump_seed) = find_pda(&program_id, &seed).unwrap();
+            // Encode the pubkey
+            into.extend(bump_seed.to_le_bytes())
+        },
+
+        DataValue::PdaNoBump(program_id, v) => {
+            // Encode v into a vector of data values.  No alignment is used since seeds should be directly
+            // concatenated.
+            let mut seed = vec![];
+            write_c_value(DataValue::Vector(v), false, &mut seed)?;
+            // Compute the address and bump seed, which may fail since a bump seed is not being used
+            match try_find_pda(&program_id, &seed, None) {
+                Some(pubkey) => {
+                    // Encode the pubkey
+                    write_c_value(DataValue::Pubkey(pubkey), false, into)?
+                },
+                None => return Err(stre("PDA could not be derived"))
+            }
+        },
 
         DataValue::Vector(_) => return Err(stre("vector value cannot be used with c encoding")),
 
         DataValue::Struct(v) => {
             let alignment = c_max_alignment(&v);
-            c_align(alignment, into);
+            c_align(alignment, align, into);
             for v in v.into_iter() {
-                write_c_value(*v, into)?;
+                write_c_value(*v, align, into)?;
             }
-            c_align(alignment, into);
+            c_align(alignment, align, into);
         },
 
         DataValue::Enum { index, params } => {
@@ -1052,13 +1245,13 @@ fn write_c_value(
             }
             into.push(index as u8);
             if let Some(params) = params {
-                write_c_value(DataValue::Struct(params), into)?
+                write_c_value(DataValue::Struct(params), align, into)?
             }
         },
 
-        DataValue::Some(v) => write_c_value(DataValue::Enum { index : 1, params : Some(vec![v]) }, into)?,
+        DataValue::Some(v) => write_c_value(DataValue::Enum { index : 1, params : Some(vec![v]) }, align, into)?,
 
-        DataValue::None => write_c_value(DataValue::Enum { index : 0, params : None }, into)?
+        DataValue::None => write_c_value(DataValue::Enum { index : 0, params : None }, align, into)?
     }
 
     Ok(())
@@ -1074,7 +1267,7 @@ fn write_data_value(
         Encoding::RustBincodeVarInt => write_rust_bincode_value(data_value, true, into),
         Encoding::RustBincodeFixedInt => write_rust_bincode_value(data_value, false, into),
         Encoding::RustBorsh => write_rust_borsh_value(data_value, into),
-        Encoding::C => write_c_value(data_value, into)
+        Encoding::C => write_c_value(data_value, true, into)
     }
 }
 
@@ -1192,7 +1385,7 @@ fn do_encode(args : &mut std::env::Args) -> Result<(), Error>
 
         let mut accounts : Vec<(Address, bool, bool)> = vec![];
 
-        read_accounts(&mut words, &mut accounts)?;
+        read_accounts(&mut words, &encoding, &mut accounts)?;
 
         let mut data_values = Vec::<DataValue>::new();
 
