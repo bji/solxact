@@ -1515,7 +1515,7 @@ fn get_rpc_url(args : &mut std::env::Args) -> Result<String, Error>
             "d" | "devnet" => DEFAULT_DEVNET_RPC_URL.to_string(),
             "t" | "testnet" => DEFAULT_TESTNET_RPC_URL.to_string(),
             "m" | "mainnet" => DEFAULT_MAINNET_RPC_URL.to_string(),
-            _ => args[1].clone()
+            _ => args[0].clone()
         },
         _ => return Err(stre(&format!("Invalid argument: {}", args[1])))
     })
