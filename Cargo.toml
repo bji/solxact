@@ -2,6 +2,8 @@
 name = "solxact"
 version = "0.1.0"
 edition = "2021"
+description = "solxact is a utility program that can perform many useful actions on solana transactions"
+license = "GPL-3.0-only"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
