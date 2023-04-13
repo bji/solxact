@@ -31,7 +31,7 @@ pub struct PubkeyWithSignature
 {
     pub pubkey : Pubkey,
 
-    pub signature : Option<ed25519::Signature>
+    pub signature : Option<ed25519_dalek::Signature>
 }
 
 #[derive(PartialEq, Clone)]
@@ -111,7 +111,7 @@ impl Transaction
             )));
         }
 
-        let mut signatures = Vec::<Option<ed25519::Signature>>::new();
+        let mut signatures = Vec::<Option<ed25519_dalek::Signature>>::new();
 
         let mut buf = [0_u8; 64];
 
@@ -121,7 +121,7 @@ impl Transaction
                 None
             }
             else {
-                Some(ed25519::Signature::from_bytes(&buf).map_err(|e| format!("{}", e))?)
+                Some(ed25519_dalek::Signature::from_bytes(&buf).map_err(|e| format!("{}", e))?)
             });
         }
 
@@ -482,7 +482,7 @@ impl Transaction
     pub fn sign(
         &mut self,
         pubkey : &Pubkey,
-        signature : ed25519::Signature
+        signature : ed25519_dalek::Signature
     ) -> Result<(), Error>
     {
         for i in 0..self.signed_read_write_addresses.len() {
@@ -544,7 +544,7 @@ impl Transaction
     }
 
     fn decode_signature_from_header(
-        signatures : impl IntoIterator<Item = Option<ed25519::Signature>>,
+        signatures : impl IntoIterator<Item = Option<ed25519_dalek::Signature>>,
         r : &mut dyn std::io::Read
     ) -> Result<PubkeyWithSignature, Error>
     {
@@ -675,7 +675,7 @@ impl Transaction
     }
 
     fn encode_signature(
-        signature : Option<ed25519::Signature>,
+        signature : Option<ed25519_dalek::Signature>,
         w : &mut dyn std::io::Write
     ) -> Result<(), Error>
     {
