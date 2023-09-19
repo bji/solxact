@@ -513,11 +513,12 @@ ERROR: Cannot find PDA, consider allowing bump seed
 pub const PUBKEY_USAGE_MESSAGE : &str = "
 
 solxact pubkey will read a pubkey in from several possible sources, and then
-print out the pubkey in one of two possible formats.
+print out the pubkey in one of three possible formats.
 
 If \"bytes\" is the first argument, then the pubkey will be printed out as a
-JSON array of bytes, otherwise, the pubkey will be printed out as a
-Base58-encoded string.
+JSON array of bytes, otherwise; otherwise if \"base64\" is the first argument,
+then the pubkey will be printed out in Base64 encoding; otherwise the pubkey
+will be printed out as a Base58-encoded string.
 
 The argument specifying input pubkey is the last argument to the program.  It
 is one of:
@@ -536,5 +537,9 @@ $ solxact pubkey key.json
 To convert a pubkey from Base58 to a JSON array of bytes:
 
 $ solxact pubkey bytes metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s
+
+To convert a pubkey from Base58 to Base64:
+
+$ solxact pubkey base64 metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s
 
 ";

@@ -1724,6 +1724,11 @@ fn print_pubkey_bytes(b : &[u8; 32])
     print!("]");
 }
 
+fn print_pubkey_base64(b : &[u8; 32])
+{
+    println!("{}", base64::encode(&b));
+}
+
 fn do_pda(args : &mut std::env::Args) -> Result<(), Error>
 {
     let mut args = args.peekable();
@@ -1783,7 +1788,15 @@ fn do_pubkey(args : &mut std::env::Args) -> Result<(), Error>
     let mut args = args.peekable();
 
     // First argument may be "bytes"
-    let bytes = args.next_if_eq("bytes").is_some();
+    let mut bytes = false;
+    let mut base64 = false;
+
+    if args.next_if_eq("bytes").is_some() {
+        bytes = true;
+    }
+    else if args.next_if_eq("base64").is_some() {
+        base64 = true;
+    }
 
     let mut words = Vec::<String>::new();
 
@@ -1793,6 +1806,10 @@ fn do_pubkey(args : &mut std::env::Args) -> Result<(), Error>
 
     if bytes {
         print_pubkey_bytes(&program_id.0);
+        println!("");
+    }
+    else if base64 {
+        print_pubkey_base64(&program_id.0);
         println!("");
     }
     else {
