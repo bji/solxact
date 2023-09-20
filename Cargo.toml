@@ -1,6 +1,6 @@
 [package]
 name = "solxact"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "solxact is a utility program that can perform many useful actions on solana transactions"
 license = "GPL-3.0-only"

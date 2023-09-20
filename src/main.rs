@@ -1461,19 +1461,47 @@ fn do_decode() -> Result<(), Error>
         .map_err(|err| Box::new(err).into())
 }
 
+fn post_json_honor_backoff(
+    url : &str,
+    json : &str
+) -> Result<ureq::Response, ureq::Error>
+{
+    loop {
+        match ureq::post(&url).set("Content-Type", "application/json").send_string(&json) {
+            Ok(response) => return Ok(response),
+            Err(ureq::Error::Status(status, response)) => {
+                if status == 429 {
+                    // Sleep according to the Retry-After header, or a default of 3 seconds if that header is not
+                    // present
+                    std::thread::sleep(std::time::Duration::from_secs(
+                        response.header("Retry-After").and_then(|value| value.parse::<u64>().ok()).unwrap_or(3)
+                    ));
+                }
+                else {
+                    return Err(ureq::Error::Status(status, response));
+                }
+            },
+            Err(error) => return Err(error)
+        }
+    }
+}
+
 fn fetch_recent_blockhash_using_method(
     rpc_url : &str,
     method : &str
 ) -> Result<String, Error>
 {
-    let resp = ureq::post(rpc_url).set("Content-Type", "application/json").send_string(&format!(
-        "{}",
-        serde_json::json!({
-            "jsonrpc" : "2.0",
-            "id" : 1,
-            "method" : method
-        })
-    ))?;
+    let resp = post_json_honor_backoff(
+        rpc_url,
+        &format!(
+            "{}",
+            serde_json::json!({
+                "jsonrpc" : "2.0",
+                "id" : 1,
+                "method" : method
+            })
+        )
+    )?;
 
     match jv(serde_json::from_reader(resp.into_reader()).map_err(|e| format!("{}", e))?, "result.value.blockhash")? {
         serde_json::Value::String(s) => Ok(s),
@@ -1596,10 +1624,7 @@ fn do_simulate(args : &mut std::env::Args) -> Result<(), Error>
         })
     );
 
-    let resp = ureq::post(&rpc_url)
-        .set("Content-Type", "application/json")
-        .send_string(&json_request)
-        .map_err(|e| format!("{}", e))?;
+    let resp = post_json_honor_backoff(&rpc_url, &json_request).map_err(|e| format!("{}", e))?;
 
     let result_json = serde_json::from_reader(resp.into_reader()).map_err(|e| format!("{}", e))?;
 
@@ -1659,10 +1684,7 @@ fn do_submit(args : &mut std::env::Args) -> Result<(), Error>
         })
     );
 
-    let resp = ureq::post(&rpc_url)
-        .set("Content-Type", "application/json")
-        .send_string(&json_request)
-        .map_err(|e| format!("{}", e))?;
+    let resp = post_json_honor_backoff(&rpc_url, &json_request).map_err(|e| format!("{}", e))?;
 
     let result_json = serde_json::from_reader(resp.into_reader()).map_err(|e| format!("{}", e))?;
 
@@ -1686,10 +1708,7 @@ fn do_submit(args : &mut std::env::Args) -> Result<(), Error>
                 })
             );
             loop {
-                let resp = ureq::post(&rpc_url)
-                    .set("Content-Type", "application/json")
-                    .send_string(&json_request)
-                    .map_err(|e| format!("{}", e))?;
+                let resp = post_json_honor_backoff(&rpc_url, &json_request).map_err(|e| format!("{}", e))?;
 
                 let json_result = serde_json::from_reader(resp.into_reader()).map_err(|e| format!("{}", e))?;
                 match jv(json_result, "result") {

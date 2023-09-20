@@ -380,8 +380,8 @@ signature.
 pub const SIMULATE_USAGE_MESSAGE : &str = "
 
 solxact simulate will read an encoded transaction from standard input and
-simulate its execution for a given cluster.  It will print to standard output
-the json-encoded results of simulating the transaction.
+simulate its execution for a given cluster.  On success, it will print to standard
+output the encoded transaction.  On failure it will print to stderr the failure.
 
 If no arguments are passed to solxact simulate, then the mainnet cluster will
 be used for the simulation.  If a single argument is passed to solxact
