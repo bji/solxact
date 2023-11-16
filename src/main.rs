@@ -1373,11 +1373,6 @@ fn do_encode(args : &mut std::env::Args) -> Result<(), Error>
         }
     }
     else {
-        // Ensure that nothing was piped to stdin
-        if !atty::is(atty::Stream::Stdin) {
-            return Err(stre("When command line arguments are used with decode, stdin will not be read"));
-        }
-
         args.iter().for_each(|a| words.extend(make_words(&a)));
     }
 
