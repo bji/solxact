@@ -327,7 +327,6 @@ fn pubkey_from_words(words : &mut Vec<String>) -> Result<String, Error>
 // encoding is used for pda and pda_nobump accounts
 fn read_accounts(
     words : &mut Vec<String>,
-    encoding : &Encoding,
     into : &mut Vec<(Address, bool, bool)>
 ) -> Result<(), Error>
 {
@@ -349,7 +348,7 @@ fn read_accounts(
             "pda" | "pda_nobump" => {
                 let dv = read_data_value(words)?.unwrap();
                 let mut bytes = vec![];
-                write_data_value(dv, encoding, &mut bytes)?;
+                write_data_value(dv, &Encoding::C, &mut bytes)?;
                 Pubkey(bytes.as_slice().try_into()?)
             },
             _ => make_pubkey(&pubkey_from_words(words)?)?
@@ -1432,7 +1431,7 @@ fn do_encode(args : &mut std::env::Args) -> Result<(), Error>
 
         let mut accounts : Vec<(Address, bool, bool)> = vec![];
 
-        read_accounts(&mut words, &encoding, &mut accounts)?;
+        read_accounts(&mut words, &mut accounts)?;
 
         let mut data_values = Vec::<DataValue>::new();
 
